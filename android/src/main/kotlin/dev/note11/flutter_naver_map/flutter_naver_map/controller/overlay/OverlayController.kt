@@ -106,7 +106,11 @@ internal class OverlayController(
         val query = NOverlayQuery.fromQuery(call.method)
         val overlay = getOverlay(query.info)
 
-        requireNotNull(overlay) { "overlay can't found because it's null" }
+        if (overlay == null) {
+            // debug log 권장
+            result.success(null)
+            return
+        }
 
         val isInvokedOnCommonOverlay =
             handleOverlay(overlay, query.methodName, call.arguments, result)
