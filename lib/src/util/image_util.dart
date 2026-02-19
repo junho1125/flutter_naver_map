@@ -74,10 +74,9 @@ class ImageUtil {
     final previousCacheFolders = await previousCacheFolderStream.toList();
 
     for (final folder in previousCacheFolders) {
-      unawaited(folder.delete(recursive: true).catchError((e) {
-        log("이전 임시 폴더 삭제 중 오류가 발생했습니다. 메시지: ${e.message}",
-            name: "ImageSaveUtil");
-      })); // not wait.
+      if (folder case Directory(:final path)) {
+        unawaited(_deleteDirectorySafely(folder, path: path)); // not wait.
+      }
     }
   }
 
@@ -92,9 +91,26 @@ class ImageUtil {
       if (dir case Directory(:final path)) {
         final name = path.split("/").last;
         if (name.startsWith(_oldV1PathPrefix)) {
-          dir.delete(recursive: true); // not wait.
+          unawaited(_deleteDirectorySafely(dir, path: path)); // not wait.
         }
       }
+    }
+  }
+
+  static Future<void> _deleteDirectorySafely(
+    Directory dir, {
+    required String path,
+  }) async {
+    try {
+      await dir.delete(recursive: true);
+    } on FileSystemException catch (e) {
+      log(
+        "임시 폴더 삭제 중 오류가 발생했습니다. 경로: $path, 메시지: ${e.message}",
+        name: "ImageSaveUtil",
+      );
+    } catch (e) {
+      log("임시 폴더 삭제 중 오류가 발생했습니다. 경로: $path, 오류: $e",
+          name: "ImageSaveUtil");
     }
   }
 
