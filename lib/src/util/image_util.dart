@@ -1,3 +1,4 @@
+import "dart:async";
 import "dart:convert" show utf8;
 import "dart:developer" show log;
 import "dart:io" show Directory, File, FileSystemException;
@@ -73,7 +74,10 @@ class ImageUtil {
     final previousCacheFolders = await previousCacheFolderStream.toList();
 
     for (final folder in previousCacheFolders) {
-      folder.delete(recursive: true); // not wait.
+      unawaited(folder.delete(recursive: true).catchError((e) {
+        log("이전 임시 폴더 삭제 중 오류가 발생했습니다. 메시지: ${e.message}",
+            name: "ImageSaveUtil");
+      })); // not wait.
     }
   }
 
