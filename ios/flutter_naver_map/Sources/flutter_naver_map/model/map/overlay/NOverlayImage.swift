@@ -12,19 +12,29 @@ internal struct NOverlayImage {
     }
 
     private func makeOverlayImageWithPath() -> NMFOverlayImage {
-        let image = UIImage(contentsOfFile: path)
-        let scaledImage = UIImage(data: image!.pngData()!, scale: DisplayUtil.scale)
-        let overlayImg = NMFOverlayImage(image: scaledImage!)
-        return overlayImg
+        guard !path.isEmpty,
+              let image = UIImage(contentsOfFile: path),
+              let data = image.pngData(),
+              let scaledImage = UIImage(data: data, scale: DisplayUtil.scale) else {
+            assertionFailure("[FlutterNaverMapPlugin] Invalid overlay image path: \(path)")
+            return NMFOverlayImage(image: UIImage())
+        }
+
+        return NMFOverlayImage(image: scaledImage)
     }
-    
+
     private func makeOverlayImageWithAssetPath() -> NMFOverlayImage {
         let key = SwiftFlutterNaverMapPlugin.getAssets(path: path)
-        let assetPath = Bundle.main.path(forResource: key, ofType: nil) ?? ""
-        let image = UIImage(contentsOfFile: assetPath)
-        let scaledImage = UIImage(data: image!.pngData()!, scale: DisplayUtil.scale)
-        let overlayImg = NMFOverlayImage(image: scaledImage!, reuseIdentifier: assetPath)
-        return overlayImg
+
+        guard let assetPath = Bundle.main.path(forResource: key, ofType: nil),
+              let image = UIImage(contentsOfFile: assetPath),
+              let data = image.pngData(),
+              let scaledImage = UIImage(data: data, scale: DisplayUtil.scale) else {
+            assertionFailure("[FlutterNaverMapPlugin] Invalid overlay asset path: \(path)")
+            return NMFOverlayImage(image: UIImage())
+        }
+
+        return NMFOverlayImage(image: scaledImage, reuseIdentifier: assetPath)
     }
 
     func toMessageable() -> Dictionary<String, Any> {
