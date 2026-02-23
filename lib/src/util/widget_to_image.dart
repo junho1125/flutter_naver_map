@@ -64,9 +64,15 @@ class WidgetToImageUtil {
     try {
       final image = await renderBox.toImage(pixelRatio: view.devicePixelRatio);
 
-      final rawImage = await image
-          .toByteData(format: ImageByteFormat.png)
-          .then((b) => b!.buffer.asUint8List());
+      final byteData = await image.toByteData(format: ImageByteFormat.png);
+      if (byteData == null) {
+        throw StateError("WidgetToImageUtil: toByteData returned null");
+      }
+
+      final rawImage = byteData.buffer.asUint8List();
+      if (rawImage.isEmpty) {
+        throw StateError("WidgetToImageUtil: generated empty PNG bytes");
+      }
 
       return rawImage;
     } finally {

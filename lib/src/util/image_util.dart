@@ -10,17 +10,51 @@ import "package:path_provider/path_provider.dart" show getTemporaryDirectory;
 class ImageUtil {
   // todo: maxCacheCount or maxCacheSize 도입
   static final Map<String, String> _hashPathMap = {};
+  static final Map<String, Future<String>> _inflightSaveByKey = {};
 
-  static Future<String> saveImage(Uint8List bytes, [String? cacheKey]) async {
-    final key = cacheKey ?? _generateImageHashFromBytes(bytes);
-    late final String path;
-    if (_hashPathMap.containsKey(key)) {
-      path = _hashPathMap[key]!;
-      log("이미 저장된 이미지입니다. 저장된 path를 반환합니다. $path", name: "ImageSaveUtil");
-    } else {
-      path = await _makeFile(key, bytes);
-      _hashPathMap[key] = path;
+  static Future<Directory>? _imageTempDirInitFuture;
+  static Directory? _imageTempDir;
+
+  static Future<String> saveImage(
+    Uint8List bytes, [
+    String? cacheKey,
+  ]) async {
+    if (bytes.isEmpty) {
+      throw StateError("ImageUtil.saveImage: image bytes is empty");
     }
+
+    final key = cacheKey ?? _generateImageHashFromBytes(bytes);
+    final cachedPath = _hashPathMap[key];
+
+    if (cachedPath != null && await _isValidImageFilePath(cachedPath)) {
+      log("이미 저장된 이미지입니다. 저장된 path를 반환합니다. $cachedPath",
+          name: "ImageSaveUtil");
+      return cachedPath;
+    }
+
+    if (cachedPath != null) {
+      _hashPathMap.remove(key);
+    }
+
+    final inflight = _inflightSaveByKey[key];
+    if (inflight != null) {
+      return await inflight;
+    }
+
+    final future = _saveImageInternal(key, bytes);
+    _inflightSaveByKey[key] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_inflightSaveByKey[key], future)) {
+        _inflightSaveByKey.remove(key);
+      }
+    }
+  }
+
+  static Future<String> _saveImageInternal(String key, Uint8List bytes) async {
+    final path = await _makeFile(key, bytes);
+    _hashPathMap[key] = path;
     return path;
   }
 
@@ -36,25 +70,76 @@ class ImageUtil {
   static Future<String> _makeFile(String key, Uint8List bytes) async {
     final tempDirPath = await _getDir().then((d) => d.path);
     final hashedKey = sha256.convert(utf8.encode(key)).toString();
-    final path = "$tempDirPath/$hashedKey.png";
+    final finalPath = "$tempDirPath/$hashedKey.png";
+    final tempPath =
+        "$tempDirPath/$hashedKey.tmp_${DateTime.now().microsecondsSinceEpoch}.png";
+
+    File? tempFile;
     try {
-      final file = await File(path).writeAsBytes(bytes);
-      return file.path;
+      tempFile = await File(tempPath).writeAsBytes(bytes, flush: true);
+      final writtenLength = await tempFile.length();
+      if (writtenLength <= 0) {
+        throw StateError(
+            "ImageUtil._makeFile: written temp file size is zero. path=$tempPath");
+      }
+
+      final finalFile = File(finalPath);
+      if (await finalFile.exists()) {
+        await finalFile.delete();
+      }
+
+      final movedFile = await tempFile.rename(finalPath);
+      final finalLength = await movedFile.length();
+      if (finalLength <= 0) {
+        throw StateError(
+            "ImageUtil._makeFile: final file size is zero. path=$finalPath");
+      }
+
+      return movedFile.path;
     } on FileSystemException catch (e) {
       log("저장중 오류가 발생했습니다. 메시지: ${e.message}", name: "ImageSaveUtil");
       rethrow;
+    } finally {
+      if (tempFile != null) {
+        try {
+          if (await tempFile.exists()) {
+            await tempFile.delete();
+          }
+        } catch (_) {}
+      }
     }
   }
 
-  /* ----- TempDir ----- */
-  static Directory? _imageTempDir;
+  static Future<bool> _isValidImageFilePath(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return false;
+      return await file.length() > 0;
+    } catch (_) {
+      return false;
+    }
+  }
 
   static Future<Directory> _getDir() async {
-    if (_imageTempDir case Directory dir) return dir;
+    final cached = _imageTempDir;
+    if (cached != null) return cached;
 
-    final imageTempDir = await _initTempDir();
-    _imageTempDir = imageTempDir;
-    return imageTempDir;
+    final inflight = _imageTempDirInitFuture;
+    if (inflight != null) {
+      final dir = await inflight;
+      _imageTempDir = dir;
+      return dir;
+    }
+
+    final initFuture = _initTempDir();
+    _imageTempDirInitFuture = initFuture;
+    try {
+      final dir = await initFuture;
+      _imageTempDir = dir;
+      return dir;
+    } finally {
+      _imageTempDirInitFuture = null;
+    }
   }
 
   static Future<Directory> _initTempDir() async {
